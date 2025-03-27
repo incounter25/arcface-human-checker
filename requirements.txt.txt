@@ -1,7 +1,1 @@
-streamlit
-opencv-python-headless
-insightface
-onnxruntime
-scikit-learn
-joblib
-Pillow
+
