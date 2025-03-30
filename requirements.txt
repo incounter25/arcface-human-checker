@@ -1,6 +1,6 @@
-gradio
-insightface
+streamlit
 opencv-python-headless
+insightface
 onnxruntime
 scikit-learn
 joblib
