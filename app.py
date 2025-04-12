@@ -1,64 +1,58 @@
 import streamlit as st
 import cv2
-import numpy as np
 from PIL import Image
+import numpy as np
 import insightface
 import joblib
 
+# 1. ArcFace 모델 로딩
+model = insightface.app.FaceAnalysis(name="buffalo_l", providers=['CPUExecutionProvider'])
+model.prepare(ctx_id=0)
 
-face_model = insightface.app.FaceAnalysis(name="buffalo_l", providers=['CPUExecutionProvider'])
-face_model.prepare(ctx_id=0)
-clf = joblib.load("is_human_classifier.pkl")
+# 2. SVM 분류기 로딩 (예외 처리 포함)
+try:
+    classifier = joblib.load("is_human_classifier.pkl")
+except Exception as e:
+    st.error(f"❌ 분류기 모델을 불러오지 못했습니다: {e}")
+    st.stop()
 
+# 3. UI 구성
+st.set_page_config(page_title="사람 얼굴 판별기", layout="centered")
+st.title("🧠 ArcFace + SVM 기반 사람 얼굴 판별기")
 
-def predict_faces_and_draw(image):
-    img = np.array(image.convert("RGB"))
-    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    faces = face_model.get(img_bgr)
+uploaded_file = st.file_uploader("얼굴 이미지 업로드", type=["jpg", "jpeg", "png"])
 
+if uploaded_file:
+    # 4. 이미지 처리
+    image = Image.open(uploaded_file).convert("RGB")
+    img_np = np.array(image)
+    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+    # 5. 얼굴 감지
+    faces = model.get(img_bgr)
     if not faces:
-        return image, ["❌ 얼굴이 감지되지 않았습니다."]
-
-    results = []
-    human_count = 1
-
-    for i, face in enumerate(faces):
+        st.error("❌ 얼굴을 감지하지 못했습니다.")
+    else:
+        face = faces[0]
+        bbox = face.bbox.astype(int)
         emb = face.embedding.reshape(1, -1)
-        pred = clf.predict(emb)[0]
-        proba = clf.predict_proba(emb)[0][pred]
-        is_human = (pred == 1)
-        label = f"{human_count}. 사람" if is_human else "비사람"
-        result_text = f"[{i+1}] {'✅ 사람' if is_human else '🧸 비사람'} (정확도: {proba:.2f})"
-        results.append(result_text)
 
+        # 6. 분류기 예측
+        pred = classifier.predict(emb)[0]
+        proba = classifier.predict_proba(emb)[0][pred]
 
-        x1, y1, x2, y2 = map(int, face.bbox)
-        color = (0, 255, 0) if is_human else (0, 0, 255)
-        cv2.rectangle(img_bgr, (x1, y1), (x2, y2), color, 2)
+        # 7. 결과 표시
+        if pred == 1:
+            label = f"✅ 사람입니다 (정확도: {proba:.2f})"
+            st.success(label)
+        else:
+            label = f"❌ 사람 얼굴이 아닙니다 (정확도: {proba:.2f})"
+            st.warning(label)
 
-        if is_human:
-            cv2.putText(img_bgr, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 2, color, 2)
-            human_count += 1
+        # 8. 얼굴 테두리 & 라벨 표시
+        cv2.rectangle(img_bgr, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 0, 255), 2)
+        cv2.putText(img_bgr, label, (bbox[0], bbox[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    annotated_image = Image.fromarray(img_rgb)
-    return annotated_image, results
-
-
-st.title("👤 얼굴 판별기 (멀티 얼굴 + 번호 부여)")
-st.write("이미지 속 모든 얼굴을 탐지하고 사람이 맞는 경우 번호를 부여합니다.")
-
-uploaded_image = st.file_uploader("이미지 업로드", type=["jpg", "jpeg", "png"])
-
-if uploaded_image is not None:
-    image = Image.open(uploaded_image)
-    st.image(image, caption="업로드된 이미지", use_column_width=True)
-
-    with st.spinner("분석 중..."):
-        annotated_img, predictions = predict_faces_and_draw(image)
-
-    st.image(annotated_img, caption="예측 결과", use_column_width=True)
-    st.markdown("### 📋 판별 결과")
-    for res in predictions:
-        st.write(res)
+        # 9. 결과 이미지 출력
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        st.image(img_rgb, caption="📷 분석 결과", use_column_width=True)
